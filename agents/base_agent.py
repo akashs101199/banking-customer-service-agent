@@ -11,6 +11,7 @@ import uuid
 from utils.llm_client import llm_client
 from agents.memory import agent_memory
 from security.audit_logger import audit_logger
+from agents.exceptions import BankingException
 
 logger = logging.getLogger(__name__)
 
@@ -263,8 +264,16 @@ Guidelines:
         """
         self.logger.error(f"Error processing query '{query}': {error}")
         
+        if isinstance(error, BankingException):
+            return self.create_response(
+                answer=f"❌ {error.user_message}",
+                success=False,
+                next_steps=error.next_steps,
+                data={"error_type": error.__class__.__name__}
+            )
+            
         return self.create_response(
-            answer="I apologize, but I encountered an error while processing your request. Please try again or contact support if the issue persists.",
+            answer="I apologize, but I encountered an unexpected error. Please try again later.",
             success=False,
             data={"error": str(error)}
         )

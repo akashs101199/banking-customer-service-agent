@@ -2,8 +2,6 @@
 Agent Memory Management using ChromaDB
 Maintains conversation context and customer history for agents
 """
-import chromadb
-from chromadb.config import Settings
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
@@ -13,9 +11,17 @@ from config import settings as app_settings
 
 logger = logging.getLogger(__name__)
 
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMA_AVAILABLE = True
+except ImportError:
+    CHROMA_AVAILABLE = False
+    logger.warning("ChromaDB not available. Using in-memory fallback.")
+
 
 class AgentMemory:
-    """Memory management for AI agents using ChromaDB"""
+    """Memory management for AI agents using ChromaDB (with fallback)"""
     
     def __init__(
         self,
@@ -32,19 +38,27 @@ class AgentMemory:
         self.collection_name = collection_name or app_settings.chroma_collection_name
         self.persist_directory = persist_directory or app_settings.chroma_persist_directory
         
-        # Initialize ChromaDB client
-        self.client = chromadb.Client(Settings(
-            persist_directory=self.persist_directory,
-            anonymized_telemetry=False
-        ))
-        
-        # Get or create collection
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"description": "Banking AI conversation memory"}
-        )
-        
-        logger.info(f"Agent memory initialized with collection: {self.collection_name}")
+        if CHROMA_AVAILABLE:
+            try:
+                # Initialize ChromaDB client
+                self.client = chromadb.Client(Settings(
+                    persist_directory=self.persist_directory,
+                    anonymized_telemetry=False
+                ))
+                
+                # Get or create collection
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name,
+                    metadata={"description": "Banking AI conversation memory"}
+                )
+                logger.info(f"Agent memory initialized with collection: {self.collection_name}")
+            except Exception as e:
+                logger.error(f"Failed to initialize ChromaDB: {e}")
+                self.collection = None
+        else:
+            self.collection = None
+            self._memory_store = []  # Simple in-memory fallback
+
     
     def add_message(
         self,
@@ -80,11 +94,19 @@ class AgentMemory:
             if agent_name:
                 meta["agent_name"] = agent_name
             
-            self.collection.add(
-                documents=[message],
-                metadatas=[meta],
-                ids=[message_id]
-            )
+            if self.collection:
+                self.collection.add(
+                    documents=[message],
+                    metadatas=[meta],
+                    ids=[message_id]
+                )
+            else:
+                # Fallback
+                self._memory_store.append({
+                    "id": message_id,
+                    "document": message,
+                    "metadata": meta
+                })
             
             return message_id
             
@@ -108,21 +130,32 @@ class AgentMemory:
             List of messages with metadata
         """
         try:
-            results = self.collection.get(
-                where={"session_id": session_id},
-                limit=limit
-            )
-            
-            if not results or not results.get("documents"):
-                return []
-            
-            messages = []
-            for i, doc in enumerate(results["documents"]):
-                messages.append({
-                    "id": results["ids"][i],
-                    "message": doc,
-                    "metadata": results["metadatas"][i]
-                })
+            if self.collection:
+                results = self.collection.get(
+                    where={"session_id": session_id},
+                    limit=limit
+                )
+                
+                if not results or not results.get("documents"):
+                    return []
+                
+                messages = []
+                for i, doc in enumerate(results["documents"]):
+                    messages.append({
+                        "id": results["ids"][i],
+                        "message": doc,
+                        "metadata": results["metadatas"][i]
+                    })
+            else:
+                # Fallback
+                session_msgs = [m for m in self._memory_store if m["metadata"]["session_id"] == session_id]
+                # Sort by timestamp desc then take limit
+                session_msgs.sort(key=lambda x: x["metadata"]["timestamp"], reverse=True)
+                messages = [{
+                    "id": m["id"],
+                    "message": m["document"],
+                    "metadata": m["metadata"]
+                } for m in session_msgs[:limit]]
             
             # Sort by timestamp
             messages.sort(key=lambda x: x["metadata"].get("timestamp", ""))
@@ -153,23 +186,27 @@ class AgentMemory:
         try:
             where_filter = {"session_id": session_id} if session_id else None
             
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=n_results,
-                where=where_filter
-            )
-            
-            if not results or not results.get("documents"):
+            if self.collection:
+                results = self.collection.query(
+                    query_texts=[query],
+                    n_results=n_results,
+                    where=where_filter
+                )
+                
+                if not results or not results.get("documents"):
+                    return []
+                
+                similar_messages = []
+                for i, docs in enumerate(results["documents"][0]):
+                    similar_messages.append({
+                        "id": results["ids"][0][i],
+                        "message": docs,
+                        "metadata": results["metadatas"][0][i],
+                        "distance": results["distances"][0][i] if "distances" in results else None
+                    })
+            else:
+                # Fallback - no semantic search
                 return []
-            
-            similar_messages = []
-            for i, docs in enumerate(results["documents"][0]):
-                similar_messages.append({
-                    "id": results["ids"][0][i],
-                    "message": docs,
-                    "metadata": results["metadatas"][0][i],
-                    "distance": results["distances"][0][i] if "distances" in results else None
-                })
             
             return similar_messages
             
@@ -227,10 +264,13 @@ class AgentMemory:
             session_id: Session ID to clear
         """
         try:
-            results = self.collection.get(where={"session_id": session_id})
-            if results and results.get("ids"):
-                self.collection.delete(ids=results["ids"])
-                logger.info(f"Cleared session: {session_id}")
+            if self.collection:
+                results = self.collection.get(where={"session_id": session_id})
+                if results and results.get("ids"):
+                    self.collection.delete(ids=results["ids"])
+                    logger.info(f"Cleared session: {session_id}")
+            else:
+                self._memory_store = [m for m in self._memory_store if m["metadata"]["session_id"] != session_id]
         except Exception as e:
             logger.error(f"Failed to clear session: {e}")
     
@@ -242,7 +282,10 @@ class AgentMemory:
             Statistics dictionary
         """
         try:
-            count = self.collection.count()
+            if self.collection:
+                count = self.collection.count()
+            else:
+                count = len(self._memory_store)
             return {
                 "collection_name": self.collection_name,
                 "total_messages": count,

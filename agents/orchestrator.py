@@ -15,6 +15,9 @@ from agents.intent_classifier import intent_classifier, Intent
 from agents.account_agent import account_agent
 from agents.transaction_agent import transaction_agent
 from agents.card_agent import card_agent
+from agents.card_agent import card_agent
+from agents.loan_underwriting_agent import loan_underwriting_agent
+from agents.investment_agent import investment_agent
 from agents.memory import agent_memory
 from utils.llm_client import llm_client
 
@@ -46,7 +49,11 @@ class BankingOrchestrator:
         self.agents = {
             "account": account_agent,
             "transaction": transaction_agent,
-            "card": card_agent
+            "account": account_agent,
+            "transaction": transaction_agent,
+            "card": card_agent,
+            "loan": loan_underwriting_agent,
+            "investment": investment_agent
         }
         
         # Build workflow graph
@@ -113,6 +120,17 @@ class BankingOrchestrator:
                 Intent.CARD_ACTIVATION.value: "card",
                 Intent.CARD_BLOCK.value: "card",
                 Intent.CARD_INQUIRY.value: "card",
+                Intent.CARD_INQUIRY.value: "card",
+                Intent.LOAN_INQUIRY.value: "loan",
+                Intent.LOAN_APPLICATION.value: "loan",
+                Intent.INVESTMENT_INQUIRY.value: "investment",
+                Intent.INVESTMENT_TRADING.value: "investment",
+                Intent.PORTFOLIO_INQUIRY.value: "investment",
+                Intent.BILL_PAYMENT.value: "transaction",
+                Intent.ADD_BENEFICIARY.value: "transaction",
+                Intent.CHANGE_PIN.value: "card",
+                Intent.SET_LIMIT.value: "card",
+                Intent.STATEMENT_REQUEST.value: "account",
             }
             
             agent_name = agent_mapping.get(intent, "general")

@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     
     # Database
     database_url: str = Field(
-        default="postgresql://bankingai:bankingai123@localhost:5432/banking_ai",
+        default="sqlite:///./banking_ai.db",
         alias="DATABASE_URL"
     )
     database_pool_size: int = Field(default=10, alias="DATABASE_POOL_SIZE")

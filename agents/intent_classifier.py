@@ -31,6 +31,12 @@ class Intent(str, Enum):
     STATEMENT_REQUEST = "statement_request"
     GENERAL_INQUIRY = "general_inquiry"
     COMPLAINT = "complaint"
+    INVESTMENT_INQUIRY = "investment_inquiry"
+    INVESTMENT_TRADING = "investment_trading"
+    PORTFOLIO_INQUIRY = "portfolio_inquiry"
+    ADD_BENEFICIARY = "add_beneficiary"
+    CHANGE_PIN = "change_pin"
+    SET_LIMIT = "set_limit"
     UNKNOWN = "unknown"
 
 
@@ -101,6 +107,29 @@ class IntentClassifier:
             Intent.COMPLAINT: [
                 "complaint", "issue", "problem", "error", "wrong transaction",
                 "dispute", "report"
+            ],
+            Intent.INVESTMENT_INQUIRY: [
+                "investment", "investing", "stock market", "market price", "share price",
+                "ticker", "symbol", "quote"
+            ],
+            Intent.INVESTMENT_TRADING: [
+                "buy stock", "sell stock", "trade", "purchase shares", "sell shares",
+                "buy shares", "invest in"
+            ],
+            Intent.PORTFOLIO_INQUIRY: [
+                "portfolio", "holdings", "my stocks", "my investments", "investment balance",
+                "investment performance"
+            ],
+            Intent.ADD_BENEFICIARY: [
+                "add beneficiary", "new payee", "save contact", "add payee",
+                "save beneficiary"
+            ],
+            Intent.CHANGE_PIN: [
+                "change pin", "new pin", "update pin", "reset pin", "set pin"
+            ],
+            Intent.SET_LIMIT: [
+                "set limit", "spending limit", "change limit", "increase limit",
+                "decrease limit", "card limit"
             ]
         }
     
@@ -152,7 +181,14 @@ Classify the user's query into one of these intents:
 - kyc_verification: KYC/document verification
 - bill_payment: Paying bills
 - statement_request: Requesting statements
+- statement_request: Requesting statements
 - complaint: Complaints or issues
+- investment_inquiry: General investment/market questions
+- investment_trading: Buying/selling stocks or assets
+- portfolio_inquiry: Checking investment holdings
+- add_beneficiary: Adding a new payee/beneficiary
+- change_pin: Changing card PIN
+- set_limit: Setting card spending limits
 - general_inquiry: General questions
 
 Respond in JSON format with:
@@ -163,7 +199,12 @@ Respond in JSON format with:
     "amount": <if mentioned>,
     "account_number": <if mentioned>,
     "card_type": <if mentioned>,
-    "transaction_id": <if mentioned>
+    "account_number": <if mentioned>,
+    "card_type": <if mentioned>,
+    "transaction_id": <if mentioned>,
+    "symbol": <if mentioned>,
+    "quantity": <if mentioned>,
+    "action": <buy/sell if mentioned>
   },
   "reasoning": "<brief explanation>"
 }"""

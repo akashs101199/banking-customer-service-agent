@@ -9,10 +9,11 @@ import string
 from sqlalchemy.orm import Session
 
 from agents.base_agent import BaseAgent
-from database.models import Customer, Account
+from database.models import Customer, Account, Transaction
 from database.connection import db_manager
 from security.audit_logger import audit_logger
 from config import settings
+from agents.exceptions import ResourceNotFoundError
 
 class AccountAgent(BaseAgent):
     """Agent for account-related operations"""
@@ -46,6 +47,8 @@ class AccountAgent(BaseAgent):
                 return self._handle_account_inquiry(query, context, session_id)
             elif "kyc" in query_lower or "verification" in query_lower:
                 return self._handle_kyc_status(query, context, session_id)
+            elif "statement" in query_lower:
+                return self._handle_statement_request(query, context, session_id)
             else:
                 return self._handle_general_account_query(query, context, session_id)
                 
@@ -147,9 +150,9 @@ Format your response as a helpful banking assistant."""
             ).first()
             
             if not customer:
-                return self.create_response(
-                    answer="I couldn't find your account information. Please verify your customer ID.",
-                    success=False
+                raise ResourceNotFoundError(
+                    "I couldn't find your customer information. Please verify your customer ID.",
+                    next_steps=["Check customer ID", "Open a new account"]
                 )
             
             accounts = customer.accounts
@@ -211,10 +214,7 @@ Format your response as a helpful banking assistant."""
             ).first()
             
             if not customer:
-                return self.create_response(
-                    answer="I couldn't find your customer information.",
-                    success=False
-                )
+                raise ResourceNotFoundError("Customer not found.")
             
             kyc_status = customer.kyc_status
             kyc_docs = customer.kyc_documents
@@ -243,6 +243,51 @@ Format your response as a helpful banking assistant."""
                     "documents_submitted": len(kyc_docs),
                     "required_documents": settings.kyc_required_documents
                 }
+            )
+
+    def _handle_statement_request(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        session_id: str
+    ) -> Dict[str, Any]:
+        """Handle statement generation request"""
+        account_number = context.get("account_number")
+        
+        if not account_number:
+            return self.create_response(
+                answer="I can generate a statement for you. Please provide your account number.",
+                success=True,
+                requires_action=True
+            )
+            
+        with db_manager.get_session() as db:
+            account = db.query(Account).filter(Account.account_number == account_number).first()
+            if not account:
+                raise ResourceNotFoundError("Account not found.")
+                
+            # Get last 30 days transactions for statement
+            txns = db.query(Transaction).filter(
+                Transaction.account_id == account.id
+            ).order_by(Transaction.transaction_date.desc()).limit(50).all()
+            
+            # Generate text-based statement
+            statement = f"📄 **Account Statement**\n"
+            statement += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+            statement += f"Account: {account.account_number} ({account.account_type.title()})\n"
+            statement += f"Balance: {account.currency} {account.balance:,.2f}\n\n"
+            statement += "**Recent Activity:**\n"
+            
+            for t in txns:
+                date_str = t.transaction_date.strftime("%Y-%m-%d")
+                amount_str = f"{t.amount:,.2f}"
+                type_sym = "+" if t.transaction_type == "credit" else "-"
+                statement += f"{date_str} | {type_sym}{amount_str} | {t.description}\n"
+                
+            return self.create_response(
+                answer=f"Here is your generated statement:\n\n{statement}",
+                success=True,
+                data={"statement_text": statement}
             )
     
     def _handle_general_account_query(

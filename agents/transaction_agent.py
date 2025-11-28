@@ -11,8 +11,11 @@ from sqlalchemy import desc
 
 from agents.base_agent import BaseAgent
 from database.models import Transaction, Account, Customer
+from database.models import Transaction, Account, Customer
 from database.connection import db_manager
 from security.audit_logger import audit_logger
+from core_banking.payment_processor import payment_processor
+from agents.exceptions import InsufficientFundsError, ResourceNotFoundError, ValidationError
 
 
 class TransactionAgent(BaseAgent):
@@ -45,7 +48,12 @@ class TransactionAgent(BaseAgent):
             elif any(keyword in query_lower for keyword in ["history", "transactions", "statement"]):
                 return self._handle_transaction_history(query, context, session_id)
             elif any(keyword in query_lower for keyword in ["transfer", "send money", "pay"]):
-                return self._handle_fund_transfer(query, context, session_id)
+                if "bill" in query_lower:
+                    return self._handle_bill_payment(query, context, session_id)
+                elif "beneficiary" in query_lower or "payee" in query_lower:
+                    return self._handle_beneficiary_management(query, context, session_id)
+                else:
+                    return self._handle_fund_transfer(query, context, session_id)
             elif "transaction" in query_lower and any(word in query_lower for word in ["details", "info", "about"]):
                 return self._handle_transaction_details(query, context, session_id)
             else:
@@ -288,6 +296,95 @@ class TransactionAgent(BaseAgent):
                     "status": transaction.status
                 }
             )
+
+    def _handle_bill_payment(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        session_id: str
+    ) -> Dict[str, Any]:
+        """Handle bill payment"""
+        biller = context.get("biller") or context.get("entities", {}).get("biller")
+        amount = context.get("amount") or context.get("entities", {}).get("amount")
+        account_number = context.get("account_number")
+        
+        if not all([biller, amount, account_number]):
+            return self.create_response(
+                answer="To pay a bill, I need the biller name, amount, and your account number.",
+                success=True,
+                requires_action=True
+            )
+            
+        with db_manager.get_session() as db:
+            account = db.query(Account).filter(Account.account_number == account_number).first()
+            if not account:
+                raise ResourceNotFoundError("Account not found.")
+            
+            if account.available_balance < Decimal(str(amount)):
+                 raise InsufficientFundsError(
+                    f"Insufficient funds for bill payment. Available: {account.currency} {account.available_balance:,.2f}",
+                    next_steps=["Check balance", "Deposit funds"]
+                )
+
+            result = payment_processor.pay_bill(
+                db=db,
+                account_id=account.id,
+                biller_name=biller,
+                amount=Decimal(str(amount))
+            )
+            
+            return self.create_response(
+                answer=f"✅ Paid {result['currency'] if 'currency' in result else '$'}{result['amount']} to {result['biller']}.",
+                success=True,
+                data=result
+            )
+
+    def _handle_beneficiary_management(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        session_id: str
+    ) -> Dict[str, Any]:
+        """Handle beneficiary management"""
+        customer_info = context.get("customer_info")
+        if not customer_info:
+            return self.create_response(answer="Please log in to manage beneficiaries.", success=False)
+            
+        customer_id = uuid.UUID(customer_info.get("customer_id"))
+        
+        with db_manager.get_session() as db:
+            if "add" in query.lower():
+                # Simplified add flow - in real app would ask for details step-by-step
+                name = context.get("name")
+                acc_num = context.get("account_number")
+                if not (name and acc_num):
+                    return self.create_response(
+                        answer="To add a beneficiary, I need their name and account number.",
+                        success=False
+                    )
+                
+                result = payment_processor.add_beneficiary(
+                    db=db,
+                    customer_id=customer_id,
+                    name=name,
+                    account_number=acc_num,
+                    bank_name="External Bank"
+                )
+                return self.create_response(
+                    answer=f"✅ Added beneficiary: {result['name']}",
+                    success=True
+                )
+            else:
+                # List beneficiaries
+                beneficiaries = payment_processor.get_beneficiaries(db, customer_id)
+                if not beneficiaries:
+                    return self.create_response(answer="You have no saved beneficiaries.", success=True)
+                
+                response = "👥 **Your Beneficiaries**\n\n"
+                for b in beneficiaries:
+                    response += f"• {b['name']} ({b['account_number']})\n"
+                
+                return self.create_response(answer=response, success=True)
     
     def _handle_general_transaction_query(
         self,

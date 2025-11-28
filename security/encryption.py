@@ -4,7 +4,7 @@ Handles encryption of sensitive data like card numbers, CVV, PII
 """
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 import base64
 import logging
@@ -30,7 +30,7 @@ class EncryptionManager:
     def _create_cipher(self, key: str) -> Fernet:
         """Create Fernet cipher from encryption key"""
         # Derive a proper key from the provided key string
-        kdf = PBKDF2(
+        kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=b'banking_ai_salt',  # In production, use unique salt per installation

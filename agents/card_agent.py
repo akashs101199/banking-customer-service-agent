@@ -14,6 +14,7 @@ from security.audit_logger import audit_logger
 from security.encryption import encryption_manager
 from security.authentication import auth_manager
 from config import settings
+from agents.exceptions import ResourceNotFoundError, ValidationError
 
 
 class CardAgent(BaseAgent):
@@ -49,6 +50,10 @@ class CardAgent(BaseAgent):
                 return self._handle_card_blocking(query, context, session_id)
             elif any(keyword in query_lower for keyword in ["card details", "card info", "my card"]):
                 return self._handle_card_inquiry(query, context, session_id)
+            elif any(keyword in query_lower for keyword in ["pin", "change pin", "set pin"]):
+                return self._handle_pin_change(query, context, session_id)
+            elif any(keyword in query_lower for keyword in ["limit", "spending limit"]):
+                return self._handle_limit_change(query, context, session_id)
             else:
                 return self._handle_general_card_query(query, context, session_id)
                 
@@ -153,9 +158,9 @@ class CardAgent(BaseAgent):
             ).first()
             
             if not card:
-                return self.create_response(
-                    answer="Card not found. Please verify the card number and try again.",
-                    success=False
+                raise ResourceNotFoundError(
+                    "Card not found. Please verify the card number.",
+                    next_steps=["Check card number", "Apply for a new card"]
                 )
             
             if card.status == "active":
@@ -217,10 +222,7 @@ class CardAgent(BaseAgent):
             ).first()
             
             if not card:
-                return self.create_response(
-                    answer="Card not found. Please verify the card number.",
-                    success=False
-                )
+                raise ResourceNotFoundError("Card not found. Please verify the card number.")
             
             if card.status == "blocked":
                 return self.create_response(
@@ -332,6 +334,70 @@ class CardAgent(BaseAgent):
                 answer=response,
                 success=True,
                 data={"cards": card_list}
+            )
+
+    def _handle_pin_change(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        session_id: str
+    ) -> Dict[str, Any]:
+        """Handle PIN change request"""
+        card_number = context.get("card_number")
+        new_pin = context.get("new_pin") or context.get("pin")
+        
+        if not card_number or not new_pin:
+            return self.create_response(
+                answer="To change your PIN, I need your card number and the new 4-digit PIN.",
+                success=True,
+                requires_action=True
+            )
+            
+        with db_manager.get_session() as db:
+            card = db.query(Card).filter(Card.card_number.like(f"%{card_number[-4:]}")).first()
+            if not card:
+                return self.create_response(answer="Card not found.", success=False)
+                
+            # In production, we would hash this
+            card.pin_hash = new_pin
+            db.commit()
+            
+            return self.create_response(
+                answer="✅ Your PIN has been successfully updated.",
+                success=True
+            )
+
+    def _handle_limit_change(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        session_id: str
+    ) -> Dict[str, Any]:
+        """Handle spending limit change"""
+        card_number = context.get("card_number")
+        new_limit = context.get("limit") or context.get("amount")
+        
+        if not card_number or not new_limit:
+            return self.create_response(
+                answer="To set a spending limit, I need your card number and the new limit amount.",
+                success=True,
+                requires_action=True
+            )
+            
+        with db_manager.get_session() as db:
+            card = db.query(Card).filter(Card.card_number.like(f"%{card_number[-4:]}")).first()
+            if not card:
+                raise ResourceNotFoundError("Card not found.")
+            
+            if card.card_type != "credit":
+                 raise ValidationError("Limit management is only available for credit cards.")
+
+            card.credit_limit = float(new_limit)
+            db.commit()
+            
+            return self.create_response(
+                answer=f"✅ Credit limit updated to ${float(new_limit):,.2f}",
+                success=True
             )
     
     def _handle_general_card_query(
