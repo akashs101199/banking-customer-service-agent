@@ -1,5 +1,8 @@
 # Banking Customer Service Agentic AI 🏦🤖
 
+> **🚧 WORK IN PROGRESS 🚧**
+> This project is currently in active development. Features and APIs are subject to change.
+
 A fully autonomous banking customer service system powered by open-source AI agents. This system handles account creation, transactions, card services, KYC verification, and all banking processes **without human intervention**.
 
 ## 🌟 Features
@@ -13,6 +16,7 @@ A fully autonomous banking customer service system powered by open-source AI age
 - **Compliance**: Built-in KYC/AML screening and audit logging
 
 ### AI-Powered Agents
+- **CrewAI Integration**: Collaborative role-based agents (Senior Banker, Transaction Specialist, etc.)
 - **Multi-Agent Architecture**: Specialized agents for different banking domains
 - **Intent Classification**: Automatic routing to appropriate agents
 - **Conversation Memory**: Context-aware responses using semantic search
@@ -63,6 +67,7 @@ A fully autonomous banking customer service system powered by open-source AI age
 ## 🛠️ Technology Stack
 
 ### AI & LLM
+- **CrewAI**: Role-based agent orchestration
 - **LangChain**: Agent orchestration and LLM integration
 - **LangGraph**: Multi-agent workflow management
 - **Ollama**: Local LLM deployment (Llama 3.1 / Mistral)
